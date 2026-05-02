@@ -329,7 +329,7 @@
               }),
               el(components.TextControl, {
                 label: __('Game Report Link', 'esc-gamepitch'),
-                help: __('URL pattern for game reports. Use %s as placeholder for the game ID. Example: /spielbericht/%s/', 'esc-gamepitch'),
+                help: __('Query-string pattern for game navigation. Use %s as placeholder for the game ID. Example: ?game_id=%s', 'esc-gamepitch'),
                 value: attrs.game_link || '',
                 onChange: function (v) { props.setAttributes({ game_link: v }); }
               }),

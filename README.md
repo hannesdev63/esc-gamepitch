@@ -36,17 +36,17 @@ A single-shortcode solution that renders a **Division Picker** above a **Schedul
 ```
 
 ```text
-[esc_division_schedule game_link="/spielbericht/%s/"]
+[esc_division_schedule game_link="?game_id=%s"]
 ```
 
 ```text
-[esc_division_schedule game_link="/spielbericht/%s/" team_id="27"]
+[esc_division_schedule game_link="?game_id=%s" team_id="27"]
 ```
 
 ```text
 [esc_division_schedule
   divisions='[{"divisionId":13,"divisionName":"Grunddurchgang"},{"divisionId":27,"divisionName":"Playoffs"}]'
-  game_link="/spielbericht/%s/"]
+  game_link="?game_id=%s"]
 ```
 
 | Attribute | Default | Description |
@@ -54,11 +54,65 @@ A single-shortcode solution that renders a **Division Picker** above a **Schedul
 | `api_key` | plugin setting | HockeyData API key |
 | `division_id` | plugin setting | Pre-selected division (optional) |
 | `team_id` | plugin setting | Focuses the schedule on one team (optional) |
-| `game_link` | *(none)* | URL pattern for game reports; `%s` is replaced with the game ID |
+| `game_link` | `?game_id=%s` | Query-string pattern for game navigation; `%s` is replaced with the game ID |
 | `divisions` | *(none)* | JSON array `[{"divisionId":…,"divisionName":"…"},…]` to populate the picker |
 | `class` | *(none)* | Extra CSS class on the wrapper div |
 | `fallback_message` | *"Schedule is currently unavailable."* | Shown when the widget cannot load |
 | `debug` | `0` | Set to `1` to enable debug output |
+
+### Complete Example: esc_standings -> game report -> back
+
+This example uses one WordPress page and branches by query string.
+
+- Default view (`?`): show standings plus a schedule with game links.
+- Report view (`?view=report&game_id=...`): show one game report and a back link.
+- `division_id`, `team_id`, and `game_id` are read from the query string automatically by this plugin.
+
+Create a page template, e.g. `page-standings-report.php`, and assign it to a page like `/tabelle/`:
+
+```php
+<?php
+/**
+ * Template Name: ESC Standings Report Flow
+ */
+
+get_header();
+
+$view        = isset($_GET['view']) ? sanitize_text_field(wp_unslash($_GET['view'])) : '';
+$game_id     = isset($_GET['game_id']) ? intval($_GET['game_id']) : 0;
+$division_id = isset($_GET['division_id']) ? intval($_GET['division_id']) : 13;
+$team_id     = isset($_GET['team_id']) ? intval($_GET['team_id']) : 27;
+
+$base_url  = get_permalink();
+$back_link = add_query_arg(
+  array(
+    'division_id' => $division_id,
+    'team_id'     => $team_id,
+  ),
+  $base_url
+);
+
+if ($view === 'report' && $game_id > 0) {
+  echo '<p><a href="' . esc_url($back_link) . '">← Back to standings</a></p>';
+  echo do_shortcode('[esc_game_livebox fallback_message="Game report is currently unavailable."]');
+} else {
+  echo do_shortcode('[esc_standings fallback_message="Standings are currently unavailable."]');
+
+  echo do_shortcode(
+    '[esc_division_schedule '
+    . 'game_link="?view=report&game_id=%s&division_id=' . $division_id . '&team_id=' . $team_id . '" '
+    . 'fallback_message="Schedule is currently unavailable."]'
+  );
+}
+
+get_footer();
+```
+
+Result:
+
+- Users open `/tabelle/?division_id=13&team_id=27` and see standings + game list.
+- Clicking a game opens `/tabelle/?view=report&game_id=12345&division_id=13&team_id=27`.
+- The report page shows the game and a back link to the standings view.
 
 ### Common examples
 

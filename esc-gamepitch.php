@@ -23,6 +23,7 @@ final class ESC_GamePitch_Plugin
         add_action('admin_menu', array($this, 'register_settings_page'));
         add_action('wp_enqueue_scripts', array($this, 'register_assets'));
         add_action('enqueue_block_editor_assets', array($this, 'register_block_editor_assets'));
+        add_action('admin_post_esc_gamepitch_install_template', array($this, 'handle_install_template'));
 
         add_shortcode('esc_gamepitch', array($this, 'render_shortcode'));
         add_shortcode('esc_schedule', array($this, 'render_schedule_shortcode'));
@@ -226,6 +227,7 @@ final class ESC_GamePitch_Plugin
         $fields = array(
             'api_key' => 'API Key',
             'division_id' => 'Division ID',
+            'division_ids' => 'Division IDs (comma-separated, for Standings)',
             'default_team_id' => 'Default Team ID (optional)',
             'debug_comments' => 'Debug Comments',
             'widget_name' => 'Widget Class (default: hockeydata.los.Game.LiveBox)',
@@ -252,6 +254,12 @@ final class ESC_GamePitch_Plugin
 
         $out['api_key'] = isset($input['api_key']) ? sanitize_text_field($input['api_key']) : '';
         $out['division_id'] = isset($input['division_id']) ? intval($input['division_id']) : 0;
+        if (isset($input['division_ids']) && $input['division_ids'] !== '') {
+            $ids = array_filter(array_map('intval', explode(',', sanitize_text_field($input['division_ids']))));
+            $out['division_ids'] = implode(',', $ids);
+        } else {
+            $out['division_ids'] = '';
+        }
         $out['default_team_id'] = isset($input['default_team_id']) ? intval($input['default_team_id']) : 0;
         $out['sport'] = 'icehockey';
         $out['debug_comments'] = isset($input['debug_comments']) ? 1 : 0;
@@ -261,6 +269,105 @@ final class ESC_GamePitch_Plugin
         $out['default_game_id'] = isset($input['default_game_id']) ? intval($input['default_game_id']) : 0;
 
         return $out;
+    }
+
+    public function handle_install_template()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to perform this action.', 'esc-gamepitch'));
+        }
+
+        check_admin_referer('esc_gamepitch_install_template');
+
+        $theme_dir = get_stylesheet_directory();
+        $filename  = 'page-esc-standings-report.php';
+        $dest      = $theme_dir . '/' . $filename;
+
+        $redirect_base = admin_url('options-general.php?page=esc-gamepitch-settings&tab=settings');
+
+        if (file_exists($dest)) {
+            wp_safe_redirect(add_query_arg('esc_tpl', 'exists', $redirect_base));
+            exit;
+        }
+
+        $content = $this->sample_template_content();
+
+        // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+        $written = file_put_contents($dest, $content);
+
+        if ($written === false) {
+            wp_safe_redirect(add_query_arg('esc_tpl', 'error', $redirect_base));
+            exit;
+        }
+
+        wp_safe_redirect(add_query_arg('esc_tpl', 'ok', $redirect_base));
+        exit;
+    }
+
+    private function sample_template_content()
+    {
+        return <<<'PHP'
+<?php
+/**
+ * Template Name: ESC Standings Report Flow
+ * Description: Query-string based flow from standings to game report and back.
+ */
+
+if (! defined('ABSPATH')) {
+    exit;
+}
+
+get_header();
+
+$view = isset($_GET['view']) ? sanitize_text_field(wp_unslash($_GET['view'])) : '';
+$game_id = isset($_GET['game_id']) ? intval($_GET['game_id']) : 0;
+$division_id = isset($_GET['division_id']) ? intval($_GET['division_id']) : 13;
+$team_id = isset($_GET['team_id']) ? intval($_GET['team_id']) : 27;
+
+$base_url = get_permalink();
+$back_link = add_query_arg(
+    array(
+        'division_id' => $division_id,
+        'team_id'     => $team_id,
+    ),
+    $base_url
+);
+
+?>
+<div id="primary" class="content-area">
+    <main id="main" class="site-main">
+        <div class="entry-content">
+            <?php if ($view === 'report' && $game_id > 0) : ?>
+                <p>
+                    <a href="<?php echo esc_url($back_link); ?>">&larr; Back to standings</a>
+                </p>
+                <?php
+                echo do_shortcode('[esc_game_livebox fallback_message="Game report is currently unavailable."]');
+                ?>
+            <?php else : ?>
+                <?php
+                echo do_shortcode('[esc_standings fallback_message="Standings are currently unavailable."]');
+
+                $game_link = sprintf(
+                    '?view=report&game_id=%%s&division_id=%d&team_id=%d',
+                    $division_id,
+                    $team_id
+                );
+
+                echo do_shortcode(
+                    '[esc_division_schedule '
+                    . 'game_link="' . esc_attr($game_link) . '" '
+                    . 'fallback_message="Schedule is currently unavailable."]'
+                );
+                ?>
+            <?php endif; ?>
+        </div>
+    </main>
+</div>
+<?php
+
+get_footer();
+PHP;
     }
 
     public function register_settings_page()
@@ -310,6 +417,12 @@ final class ESC_GamePitch_Plugin
                 . '<a href="https://apidocs.hockeydata.net/division-finder/" target="_blank" rel="noopener">HockeyData Division Finder</a>.'
                 . '</p>';
         }
+        if ($key === 'division_ids') {
+            echo '<p class="description">'
+                . 'Comma-separated list of Division IDs used as the <code>divisions</code> array for the Standings widget. '
+                . 'Example: <code>13,14,15</code>. Leave empty to use the single Division ID above.'
+                . '</p>';
+        }
         if ($key === 'widget_name') {
             echo '<p class="description">'
                 . 'Must be a valid widget class from the '
@@ -340,6 +453,16 @@ final class ESC_GamePitch_Plugin
             <?php if ($active_tab === 'help') : ?>
                 <?php $this->render_help_tab(); ?>
             <?php else : ?>
+                <?php
+                $esc_tpl = isset($_GET['esc_tpl']) ? sanitize_text_field(wp_unslash($_GET['esc_tpl'])) : '';
+                if ($esc_tpl === 'ok') :
+                ?>
+                    <div class="notice notice-success is-dismissible"><p><?php esc_html_e('Template installed successfully.', 'esc-gamepitch'); ?></p></div>
+                <?php elseif ($esc_tpl === 'exists') : ?>
+                    <div class="notice notice-warning is-dismissible"><p><?php esc_html_e('Template already exists in the active theme — no changes made.', 'esc-gamepitch'); ?></p></div>
+                <?php elseif ($esc_tpl === 'error') : ?>
+                    <div class="notice notice-error is-dismissible"><p><?php esc_html_e('Template could not be written. Check theme folder permissions.', 'esc-gamepitch'); ?></p></div>
+                <?php endif; ?>
                 <p>Configure default values used by the shortcode <code>[esc_gamepitch]</code>.</p>
                 <form action="options.php" method="post">
                     <?php
@@ -350,6 +473,38 @@ final class ESC_GamePitch_Plugin
                 </form>
                 <h2>Shortcode Example</h2>
                 <p><code>[esc_gamepitch game_id="12345"]</code></p>
+                <hr />
+                <h2><?php esc_html_e('Sample Page Template', 'esc-gamepitch'); ?></h2>
+                <?php
+                $theme_dir  = get_stylesheet_directory();
+                $theme_name = wp_get_theme()->get('Name');
+                $filename   = 'page-esc-standings-report.php';
+                $dest       = $theme_dir . '/' . $filename;
+                $installed  = file_exists($dest);
+                ?>
+                <p>
+                    <?php
+                    printf(
+                        /* translators: 1: template filename, 2: theme name */
+                        esc_html__('Installs %1$s into the active theme (%2$s). Assign the template "ESC Standings Report Flow" to any page to get a standings + game-report flow driven entirely by query string.', 'esc-gamepitch'),
+                        '<code>' . esc_html($filename) . '</code>',
+                        '<strong>' . esc_html($theme_name) . '</strong>'
+                    );
+                    ?>
+                </p>
+                <?php if ($installed) : ?>
+                    <p><span class="dashicons dashicons-yes" style="color:#46b450"></span> <?php esc_html_e('Template is already installed.', 'esc-gamepitch'); ?></p>
+                <?php endif; ?>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <input type="hidden" name="action" value="esc_gamepitch_install_template" />
+                    <?php wp_nonce_field('esc_gamepitch_install_template'); ?>
+                    <?php submit_button(
+                        $installed ? __('Reinstall Template', 'esc-gamepitch') : __('Install Sample Template', 'esc-gamepitch'),
+                        $installed ? 'secondary' : 'primary',
+                        'submit',
+                        false
+                    ); ?>
+                </form>
             <?php endif; ?>
             </div>
         </div>
@@ -470,6 +625,7 @@ final class ESC_GamePitch_Plugin
         $defaults = array(
             'api_key' => $settings['api_key'],
             'division_id' => $settings['division_id'],
+            'division_ids' => isset($settings['division_ids']) ? $settings['division_ids'] : '',
             'sport' => 'icehockey',
             'team_id' => $settings['default_team_id'],
             'widget_name' => $settings['widget_name'],
@@ -483,6 +639,7 @@ final class ESC_GamePitch_Plugin
         );
 
         $atts = shortcode_atts($defaults, $atts, 'esc_gamepitch');
+        $atts = $this->apply_query_id_overrides($atts);
 
         $api_key = sanitize_text_field((string) $atts['api_key']);
         $division_id = intval($atts['division_id']);
@@ -532,6 +689,25 @@ final class ESC_GamePitch_Plugin
 
         if ($team_id > 0) {
             $widget_options['teamId'] = $team_id;
+        }
+
+        // The Standings widget requires a 'divisions' array. Build it from the
+        // comma-separated division_ids setting, falling back to the single division_id.
+        if (
+            $widget_name === 'hockeydata.los.Standings'
+            && ! isset($widget_options['divisions'])
+        ) {
+            $raw_ids = isset($atts['division_ids']) ? (string) $atts['division_ids'] : '';
+            if ($raw_ids !== '') {
+                $id_list = array_filter(array_map('intval', explode(',', $raw_ids)));
+                if (! empty($id_list)) {
+                    $widget_options['divisions'] = array_values(
+                        array_map(function ($id) { return array('divisionId' => $id); }, $id_list)
+                    );
+                }
+            } elseif ($division_id > 0) {
+                $widget_options['divisions'] = array(array('divisionId' => $division_id));
+            }
         }
 
         $this->enqueue_hockeydata_assets($js_modules, $css_modules);
@@ -618,7 +794,7 @@ final class ESC_GamePitch_Plugin
      * Composite shortcode: DivisionPicker + Schedule + optional game-report links.
      *
      * [esc_division_schedule]
-     * [esc_division_schedule game_link="/spielbericht/%s/" team_id="27"]
+      * [esc_division_schedule game_link="?game_id=%s" team_id="27"]
      * [esc_division_schedule divisions='[{"divisionId":13,"divisionName":"Grunddurchgang"},{"divisionId":27,"divisionName":"Playoffs"}]']
      */
     public function render_division_schedule_shortcode($atts)
@@ -637,11 +813,12 @@ final class ESC_GamePitch_Plugin
         );
 
         $atts = shortcode_atts($defaults, $atts, 'esc_division_schedule');
+        $atts = $this->apply_query_id_overrides($atts);
 
         $api_key          = sanitize_text_field((string) $atts['api_key']);
         $division_id      = intval($atts['division_id']);
         $team_id          = intval($atts['team_id']);
-        $game_link        = sanitize_text_field((string) $atts['game_link']);
+        $game_link        = $this->normalize_query_game_link_pattern(sanitize_text_field((string) $atts['game_link']));
         $debug_enabled    = $this->is_debug_enabled($atts, $settings);
         $fallback_message = sanitize_text_field((string) $atts['fallback_message']);
 
@@ -804,6 +981,48 @@ final class ESC_GamePitch_Plugin
         }
 
         return implode('&', array_filter($clean));
+    }
+
+    private function apply_query_id_overrides($atts)
+    {
+        $id_keys = array('division_id', 'team_id', 'game_id');
+
+        foreach ($id_keys as $key) {
+            if (! isset($_GET[$key])) {
+                continue;
+            }
+
+            $raw_value = wp_unslash($_GET[$key]);
+            if ($raw_value === '') {
+                continue;
+            }
+
+            $atts[$key] = intval(sanitize_text_field((string) $raw_value));
+        }
+
+        return $atts;
+    }
+
+    private function normalize_query_game_link_pattern($game_link)
+    {
+        $game_link = trim((string) $game_link);
+
+        if ($game_link === '') {
+            return '?game_id=%s';
+        }
+
+        if (strpos($game_link, 'game_id=') !== false) {
+            if (strpos($game_link, '%s') === false) {
+                return preg_replace('/(game_id=)[^&#]*/', '$1%s', $game_link, 1);
+            }
+            return $game_link;
+        }
+
+        if (strpos($game_link, '%s') !== false) {
+            return '?game_id=%s';
+        }
+
+        return $game_link . (strpos($game_link, '?') === false ? '?' : '&') . 'game_id=%s';
     }
 
     private function is_debug_enabled($atts, $settings)
