@@ -35,6 +35,11 @@
     return {
       api_key: { type: 'string', default: '' },
       division_id: { type: 'string', default: '' },
+      divisions: { type: 'string', default: '' },
+      widgets: { type: 'string', default: '' },
+      stats_preset: { type: 'string', default: 'basic' },
+      tabs: { type: 'string', default: '' },
+      game_link: { type: 'string', default: '' },
       team_id: { type: 'string', default: '' },
       game_id: { type: 'string', default: '' },
       widget_name: { type: 'string', default: preset.widget_name || '' },
@@ -95,6 +100,40 @@
                 help: __('Optional. Leave empty to use plugin settings default.', 'esc-gamepitch'),
                 value: attrs.division_id || '',
                 onChange: function (value) { props.setAttributes({ division_id: value }); }
+              }),
+              el(components.TextareaControl, {
+                label: __('Divisions JSON (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Optional array/object for DivisionPicker. Object keys can represent seasons.', 'esc-gamepitch'),
+                value: attrs.divisions || '',
+                onChange: function (value) { props.setAttributes({ divisions: value }); }
+              }),
+              el(components.TextareaControl, {
+                label: __('Widgets JSON (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Optional widgets array for DivisionPicker tabs/content.', 'esc-gamepitch'),
+                value: attrs.widgets || '',
+                onChange: function (value) { props.setAttributes({ widgets: value }); }
+              }),
+              el(components.SelectControl, {
+                label: __('Stats Preset (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Applies only when Widgets JSON is empty.', 'esc-gamepitch'),
+                value: attrs.stats_preset || 'basic',
+                options: [
+                  { label: __('Basic (Standings + Schedule)', 'esc-gamepitch'), value: 'basic' },
+                  { label: __('Extended (+ TeamStats + Leaders)', 'esc-gamepitch'), value: 'extended' }
+                ],
+                onChange: function (value) { props.setAttributes({ stats_preset: value }); }
+              }),
+              el(components.TextControl, {
+                label: __('Tabs (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Optional boolean: 1/0, true/false.', 'esc-gamepitch'),
+                value: attrs.tabs || '',
+                onChange: function (value) { props.setAttributes({ tabs: value }); }
+              }),
+              el(components.TextControl, {
+                label: __('Game Link Pattern', 'esc-gamepitch'),
+                help: __('Optional rowLink pattern like ?game_id=%s&division_id=%s for schedule rows.', 'esc-gamepitch'),
+                value: attrs.game_link || '',
+                onChange: function (value) { props.setAttributes({ game_link: value }); }
               }),
               el(components.TextControl, {
                 label: __('Team ID Focus', 'esc-gamepitch'),
@@ -157,7 +196,7 @@
           el('h4', null, __('Preview', 'esc-gamepitch')),
           previewNode,
           el('p', null, __('Shortcode equivalent:', 'esc-gamepitch')),
-          el('code', null, '[' + config.shortcodeTag + (attrs.game_id ? ' game_id="' + attrs.game_id + '"' : '') + (attrs.team_id ? ' team_id="' + attrs.team_id + '"' : '') + ']')
+          el('code', null, '[' + config.shortcodeTag + (attrs.game_id ? ' game_id="' + attrs.game_id + '"' : '') + (attrs.team_id ? ' team_id="' + attrs.team_id + '"' : '') + (attrs.stats_preset ? ' stats_preset="' + attrs.stats_preset + '"' : '') + ']')
         );
       },
 
@@ -226,8 +265,9 @@
     icon: 'filter',
     preset: {
       widget_name: 'hockeydata.los.DivisionPicker',
-      js_modules: 'los_divisionpicker',
-      css_modules: 'los_divisionpicker'
+      stats_preset: 'basic',
+      js_modules: 'los_divisionpicker&los_standings&los_schedule&los_game_fullreport&los_teamstats&los_leaders&los_configuration_icehockey',
+      css_modules: 'los_divisionpicker&los_template_default&los_game_fullreport&los_teamstats&los_leaders'
     }
   });
 

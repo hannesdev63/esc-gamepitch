@@ -1,9 +1,15 @@
 <?php
 /**
  * Plugin Name: ESC GamePitch
+ * Plugin URI:        https://github.com/hannesdev63/esc-gamepitch
  * Description: Renders HockeyData GamePitch widgets via shortcode using the HockeyData JavaScript API.
  * Version: 1.0.0
- * Author: ESC
+ * Author: hannesdev63
+ * Requires at least: 5.9
+ * Requires PHP:      7.4
+ * Author:            hannesdev63
+ * License:           GPL-2.0-or-later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  */
 
 if (! defined('ABSPATH')) {
@@ -20,6 +26,7 @@ final class ESC_GamePitch_Plugin
     {
         add_action('init', array($this, 'register_block'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_notices', array($this, 'render_admin_notice'));
         add_action('admin_menu', array($this, 'register_settings_page'));
         add_action('wp_enqueue_scripts', array($this, 'register_assets'));
         add_action('enqueue_block_editor_assets', array($this, 'register_block_editor_assets'));
@@ -31,6 +38,7 @@ final class ESC_GamePitch_Plugin
         add_shortcode('esc_game_livebox', array($this, 'render_game_livebox_shortcode'));
         add_shortcode('esc_divisionpicker', array($this, 'render_divisionpicker_shortcode'));
         add_shortcode('esc_gameticker', array($this, 'render_gameticker_shortcode'));
+        add_shortcode('esc_gameticker_current', array($this, 'render_gameticker_current_shortcode'));
         add_shortcode('esc_gameslider', array($this, 'render_gameslider_shortcode'));
         add_shortcode('esc_livegames', array($this, 'render_livegames_shortcode'));
         add_shortcode('esc_division_schedule', array($this, 'render_division_schedule_shortcode'));
@@ -45,13 +53,25 @@ final class ESC_GamePitch_Plugin
         return self::$instance;
     }
 
+    public function render_admin_notice()
+    {
+        if (! current_user_can('manage_options')) {
+            return;
+        }
+        ?>
+        <div class="notice notice-info is-dismissible">
+            <p><?php esc_html_e('Support your local hockey club!', 'esc-gamepitch'); ?></p>
+        </div>
+        <?php
+    }
+
     public function register_assets()
     {
         wp_register_script(
             'esc-gamepitch-init',
             plugin_dir_url(__FILE__) . 'assets/gamepitch.js',
             array('jquery'),
-            '1.0.0',
+            '1.1.0',
             true
         );
 
@@ -69,7 +89,7 @@ final class ESC_GamePitch_Plugin
             'esc-gamepitch-block-editor',
             plugin_dir_url(__FILE__) . 'assets/block.js',
             array('wp-blocks', 'wp-element', 'wp-editor', 'wp-components', 'wp-i18n', 'wp-block-editor', 'wp-server-side-render'),
-            '1.2.0',
+            '1.2.1',
             true
         );
 
@@ -85,6 +105,11 @@ final class ESC_GamePitch_Plugin
         $attributes = array(
             'api_key' => array('type' => 'string', 'default' => ''),
             'division_id' => array('type' => 'string', 'default' => ''),
+            'divisions' => array('type' => 'string', 'default' => ''),
+            'widgets' => array('type' => 'string', 'default' => ''),
+            'stats_preset' => array('type' => 'string', 'default' => 'basic'),
+            'tabs' => array('type' => 'string', 'default' => ''),
+            'game_link' => array('type' => 'string', 'default' => ''),
             'team_id' => array('type' => 'string', 'default' => ''),
             'game_id' => array('type' => 'string', 'default' => ''),
             'widget_name' => array('type' => 'string', 'default' => ''),
@@ -181,8 +206,9 @@ final class ESC_GamePitch_Plugin
         } elseif ($block_name === 'esc/divisionpicker') {
             $atts = wp_parse_args($atts, array(
                 'widget_name' => 'hockeydata.los.DivisionPicker',
-                'js_modules' => 'los_divisionpicker',
-                'css_modules' => 'los_divisionpicker',
+                'stats_preset' => 'basic',
+                'js_modules' => 'los_divisionpicker&los_standings&los_schedule&los_game_fullreport&los_teamstats&los_leaders&los_configuration_icehockey',
+                'css_modules' => 'los_divisionpicker&los_template_default&los_game_fullreport&los_teamstats&los_leaders',
             ));
         } elseif ($block_name === 'esc/gameticker') {
             $atts = wp_parse_args($atts, array(
@@ -228,6 +254,7 @@ final class ESC_GamePitch_Plugin
             'api_key' => 'API Key',
             'division_id' => 'Division ID',
             'division_ids' => 'Division IDs (comma-separated, for Standings)',
+            'season_divisions_json' => 'Season Divisions JSON (for DivisionPicker)',
             'default_team_id' => 'Default Team ID (optional)',
             'debug_comments' => 'Debug Comments',
             'widget_name' => 'Widget Class (default: hockeydata.los.Game.LiveBox)',
@@ -251,6 +278,7 @@ final class ESC_GamePitch_Plugin
     public function sanitize_settings($input)
     {
         $out = array();
+        $current = $this->get_settings();
 
         $out['api_key'] = isset($input['api_key']) ? sanitize_text_field($input['api_key']) : '';
         $out['division_id'] = isset($input['division_id']) ? intval($input['division_id']) : 0;
@@ -259,6 +287,29 @@ final class ESC_GamePitch_Plugin
             $out['division_ids'] = implode(',', $ids);
         } else {
             $out['division_ids'] = '';
+        }
+        if (isset($input['season_divisions_json'])) {
+            $season_raw = wp_kses_post((string) $input['season_divisions_json']);
+            $season_raw = trim($season_raw);
+
+            if ($season_raw === '') {
+                $out['season_divisions_json'] = '';
+            } else {
+                $season_decoded = $this->decode_json_attribute($season_raw);
+                if (is_array($season_decoded) && ! empty($season_decoded)) {
+                    $out['season_divisions_json'] = (string) wp_json_encode($season_decoded);
+                } else {
+                    $out['season_divisions_json'] = isset($current['season_divisions_json']) ? (string) $current['season_divisions_json'] : '';
+                    add_settings_error(
+                        self::OPTION_KEY,
+                        'season_divisions_json_invalid',
+                        __('Season Divisions JSON is invalid. Please use valid JSON (array or grouped object). Previous value was kept.', 'esc-gamepitch'),
+                        'error'
+                    );
+                }
+            }
+        } else {
+            $out['season_divisions_json'] = '';
         }
         $out['default_team_id'] = isset($input['default_team_id']) ? intval($input['default_team_id']) : 0;
         $out['sport'] = 'icehockey';
@@ -400,6 +451,27 @@ PHP;
             </label>
             <p class="description">You can still override this per request with <code>?esc_gamepitch_debug=1</code> or per shortcode with <code>debug="1"</code>.</p>
             <?php
+            return;
+        }
+
+        if ($key === 'season_divisions_json') {
+            $example_json = '{"2025/26":[{"divisionId":13,"divisionName":"Grunddurchgang"},{"divisionId":27,"divisionName":"Playoffs"}],"2024/25":[{"divisionId":44,"divisionName":"Grunddurchgang"},{"divisionId":52,"divisionName":"Playoffs"}]}';
+            ?>
+            <textarea
+                name="<?php echo esc_attr(self::OPTION_KEY); ?>[season_divisions_json]"
+                class="large-text code"
+                rows="6"
+            ><?php echo esc_textarea((string) $value); ?></textarea>
+            <?php
+            echo '<p class="description">'
+                . 'Optional JSON for <code>hockeydata.los.DivisionPicker</code>. Supports both array and grouped object format. '
+                . 'Use grouped object keys as seasons to select current and previous seasons, e.g. '
+                . '<code>{"2025/26":[{"divisionId":13,"divisionName":"Grunddurchgang"}],"2024/25":[{"divisionId":44,"divisionName":"Playoffs"}]}</code>.'
+                . '</p>';
+            echo '<p class="description"><strong>'
+                . esc_html__('Copy/Paste example:', 'esc-gamepitch')
+                . '</strong></p>';
+            echo '<textarea class="large-text code" rows="4" readonly>' . esc_textarea($example_json) . '</textarea>';
             return;
         }
 
@@ -626,6 +698,11 @@ PHP;
             'api_key' => $settings['api_key'],
             'division_id' => $settings['division_id'],
             'division_ids' => isset($settings['division_ids']) ? $settings['division_ids'] : '',
+            'divisions' => isset($settings['season_divisions_json']) ? $settings['season_divisions_json'] : '',
+            'widgets' => '',
+            'stats_preset' => 'basic',
+            'tabs' => '',
+            'game_link' => '',
             'sport' => 'icehockey',
             'team_id' => $settings['default_team_id'],
             'widget_name' => $settings['widget_name'],
@@ -635,6 +712,7 @@ PHP;
             'options' => '{}',
             'class' => '',
             'debug' => '0',
+            'current_only' => '0',
             'fallback_message' => 'Live game data is currently unavailable.',
         );
 
@@ -646,10 +724,11 @@ PHP;
         $sport = 'icehockey';
         $team_id = intval($atts['team_id']);
         $widget_name = sanitize_text_field((string) $atts['widget_name']);
-        $game_id = intval($atts['game_id']);
+        $game_id = isset($atts['game_id']) ? trim((string) $atts['game_id']) : '';
         $js_modules = $this->sanitize_modules((string) $atts['js_modules']);
         $css_modules = $this->sanitize_modules((string) $atts['css_modules']);
         $debug_enabled = $this->is_debug_enabled($atts, $settings);
+        $current_only = isset($atts['current_only']) && in_array(strtolower((string) $atts['current_only']), array('1', 'true', 'yes', 'on'), true);
         $fallback_message = sanitize_text_field((string) $atts['fallback_message']);
 
         // DivisionPicker, GameSlider and LiveGames can resolve divisionId from the URL at runtime.
@@ -667,10 +746,7 @@ PHP;
             $widget_name = 'hockeydata.los.Game.LiveBox';
         }
 
-        $custom_options = json_decode((string) $atts['options'], true);
-        if (! is_array($custom_options)) {
-            $custom_options = array();
-        }
+        $custom_options = $this->decode_json_attribute(isset($atts['options']) ? (string) $atts['options'] : '{}');
 
         $base_options = array(
             'apiKey' => $api_key,
@@ -683,7 +759,7 @@ PHP;
 
         $widget_options = array_merge($base_options, $custom_options);
 
-        if ($game_id > 0) {
+        if ($game_id !== '' && strpos($widget_name, 'hockeydata.los.Game.') === 0) {
             $widget_options['gameId'] = $game_id;
         }
 
@@ -710,10 +786,100 @@ PHP;
             }
         }
 
+        if ($widget_name === 'hockeydata.los.DivisionPicker') {
+            $divisions_json = isset($atts['divisions']) ? (string) $atts['divisions'] : '';
+            if ($divisions_json !== '' && ! isset($widget_options['divisions'])) {
+                $decoded_divisions = $this->decode_json_attribute($divisions_json);
+                if (is_array($decoded_divisions)) {
+                    $widget_options['divisions'] = $decoded_divisions;
+                }
+            }
+
+            $widgets_json = isset($atts['widgets']) ? (string) $atts['widgets'] : '';
+            if ($widgets_json !== '' && ! isset($widget_options['widgets'])) {
+                $decoded_widgets = $this->decode_json_attribute($widgets_json);
+                if (is_array($decoded_widgets)) {
+                    $widget_options['widgets'] = $decoded_widgets;
+                }
+            }
+
+            if (isset($atts['tabs']) && $atts['tabs'] !== '' && ! isset($widget_options['tabs'])) {
+                $widget_options['tabs'] = in_array(strtolower((string) $atts['tabs']), array('1', 'true', 'yes', 'on'), true);
+            }
+
+            if (! isset($widget_options['widget']) && ! isset($widget_options['widgets'])) {
+                $stats_preset = isset($atts['stats_preset']) ? sanitize_key((string) $atts['stats_preset']) : 'basic';
+                $schedule_widget_options = array();
+                if ($team_id > 0) {
+                    $schedule_widget_options['teamId'] = $team_id;
+                }
+
+                $game_link = isset($atts['game_link']) ? $this->normalize_query_game_link_pattern(sanitize_text_field((string) $atts['game_link'])) : '';
+                if ($game_link === '') {
+                    $game_link = '?game_id=%s&division_id=%s';
+                }
+                $schedule_widget_options['rowLink'] = $game_link;
+
+                $widget_options['tabs'] = true;
+                $default_widgets = array(
+                    array(
+                        'title' => 'Standings',
+                        'widget' => 'hockeydata.los.Standings',
+                        'widgetOptions' => array('columnSet' => 'long'),
+                    ),
+                    array(
+                        'title' => 'Schedule',
+                        'widget' => 'hockeydata.los.Schedule',
+                        'widgetOptions' => $schedule_widget_options,
+                    ),
+                );
+
+                $selected_game_id = '';
+                $game_id_url_parameter = 'game_id';
+                if (isset($_GET['game_id'])) {
+                    $selected_game_data = $this->extract_game_query_data(wp_unslash($_GET['game_id']));
+                    $selected_game_id = $selected_game_data['game_id'];
+                    $game_id_url_parameter = 'game_id';
+                } elseif (isset($_GET['gameId'])) {
+                    $selected_game_data = $this->extract_game_query_data(wp_unslash($_GET['gameId']));
+                    $selected_game_id = $selected_game_data['game_id'];
+                    $game_id_url_parameter = 'gameId';
+                }
+
+                if ($selected_game_id !== '') {
+                    array_unshift($default_widgets, array(
+                        'title' => 'Game Report',
+                        'widget' => 'hockeydata.los.Game.FullReport',
+                        'widgetOptions' => array(
+                            'gameIdUrlParameter' => $game_id_url_parameter,
+                        ),
+                    ));
+                }
+
+                if ($stats_preset === 'extended') {
+                    $default_widgets[] = array(
+                        'title' => 'Team Stats',
+                        'widget' => 'hockeydata.los.TeamStats',
+                        'widgetOptions' => array(),
+                    );
+                    $default_widgets[] = array(
+                        'title' => 'Leaders',
+                        'widget' => 'hockeydata.los.Leaders',
+                        'widgetOptions' => array(),
+                    );
+                }
+
+                $widget_options['widgets'] = $default_widgets;
+            }
+        }
+
         $this->enqueue_hockeydata_assets($js_modules, $css_modules);
 
         wp_enqueue_script('esc-gamepitch-init');
         wp_enqueue_style('esc-gamepitch-local');
+        wp_localize_script('esc-gamepitch-init', 'escGamePitchConfig', array(
+            'debugAllowed' => current_user_can('manage_options') ? 1 : 0,
+        ));
 
         $dom_id = 'esc-gamepitch-' . wp_rand(1000, 999999);
         $class_name = sanitize_html_class((string) $atts['class']);
@@ -723,7 +889,12 @@ PHP;
             'widgetName' => $widget_name,
             'widgetOptions' => $widget_options,
             'fallbackMessage' => $fallback_message,
+            'debugAllowed' => current_user_can('manage_options'),
         );
+
+        if ($widget_name === 'hockeydata.los.GameTicker' && $current_only) {
+            $payload['onlyWhenCurrent'] = true;
+        }
 
         $json_payload = wp_json_encode($payload);
         if ($json_payload === false) {
@@ -758,8 +929,9 @@ PHP;
     {
         return $this->render_preset_shortcode($atts, array(
             'widget_name' => 'hockeydata.los.DivisionPicker',
-            'js_modules' => 'los_divisionpicker',
-            'css_modules' => 'los_divisionpicker',
+            'stats_preset' => 'basic',
+            'js_modules' => 'los_divisionpicker&los_standings&los_schedule&los_game_fullreport&los_teamstats&los_leaders&los_configuration_icehockey',
+            'css_modules' => 'los_divisionpicker&los_template_default&los_game_fullreport&los_teamstats&los_leaders',
         ));
     }
 
@@ -767,6 +939,16 @@ PHP;
     {
         return $this->render_preset_shortcode($atts, array(
             'widget_name' => 'hockeydata.los.GameTicker',
+            'js_modules' => 'los_gameticker',
+            'css_modules' => 'los_gameticker',
+        ));
+    }
+
+    public function render_gameticker_current_shortcode($atts)
+    {
+        return $this->render_preset_shortcode($atts, array(
+            'widget_name' => 'hockeydata.los.GameTicker',
+            'current_only' => '1',
             'js_modules' => 'los_gameticker',
             'css_modules' => 'los_gameticker',
         ));
@@ -851,7 +1033,7 @@ PHP;
         }
 
         if ($atts['divisions'] !== '') {
-            $divisions_decoded = json_decode($atts['divisions'], true);
+            $divisions_decoded = $this->decode_json_attribute((string) $atts['divisions']);
             if (is_array($divisions_decoded)) {
                 $widget_options['divisions'] = $divisions_decoded;
             }
@@ -863,6 +1045,9 @@ PHP;
         $this->enqueue_hockeydata_assets($js_modules, $css_modules);
         wp_enqueue_script('esc-gamepitch-init');
         wp_enqueue_style('esc-gamepitch-local');
+        wp_localize_script('esc-gamepitch-init', 'escGamePitchConfig', array(
+            'debugAllowed' => current_user_can('manage_options') ? 1 : 0,
+        ));
 
         $dom_id     = 'esc-gamepitch-' . wp_rand(1000, 999999);
         $class_name = sanitize_html_class((string) $atts['class']);
@@ -872,6 +1057,7 @@ PHP;
             'widgetName'      => 'hockeydata.los.DivisionPicker',
             'widgetOptions'   => $widget_options,
             'fallbackMessage' => $fallback_message,
+            'debugAllowed'    => current_user_can('manage_options'),
         );
 
         $json_payload = wp_json_encode($payload);
@@ -983,9 +1169,49 @@ PHP;
         return implode('&', array_filter($clean));
     }
 
+    private function decode_json_attribute($value)
+    {
+        if (! is_string($value)) {
+            return array();
+        }
+
+        $raw = trim($value);
+        if ($raw === '') {
+            return array();
+        }
+
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        // Normalize typographic quotes often introduced by copy/paste from rich text editors.
+        $normalized = strtr($raw, array(
+            '“' => '"',
+            '”' => '"',
+            '„' => '"',
+            '‟' => '"',
+            '’' => "'",
+            '‘' => "'",
+            '‚' => "'",
+        ));
+
+        // Some editors wrap JSON in single quotes; strip one outer pair.
+        if (strlen($normalized) >= 2 && $normalized[0] === "'" && $normalized[strlen($normalized) - 1] === "'") {
+            $normalized = substr($normalized, 1, -1);
+        }
+
+        $decoded = json_decode($normalized, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+
+        return array();
+    }
+
     private function apply_query_id_overrides($atts)
     {
-        $id_keys = array('division_id', 'team_id', 'game_id');
+        $id_keys = array('division_id', 'team_id');
 
         foreach ($id_keys as $key) {
             if (! isset($_GET[$key])) {
@@ -1000,7 +1226,57 @@ PHP;
             $atts[$key] = intval(sanitize_text_field((string) $raw_value));
         }
 
+        if (isset($_GET['game_id'])) {
+            $game_data = $this->extract_game_query_data(wp_unslash($_GET['game_id']));
+            if ($game_data['game_id'] !== '') {
+                $atts['game_id'] = $game_data['game_id'];
+            }
+
+            // Some integrations pass "game_id=<gameId>,<divisionId>".
+            if ($game_data['division_id'] > 0 && ! isset($_GET['division_id'])) {
+                $atts['division_id'] = $game_data['division_id'];
+            }
+        }
+
+        // Accept camelCase aliases from custom links.
+        if (isset($_GET['gameId']) && ! isset($_GET['game_id'])) {
+            $game_data = $this->extract_game_query_data(wp_unslash($_GET['gameId']));
+            if ($game_data['game_id'] !== '') {
+                $atts['game_id'] = $game_data['game_id'];
+            }
+
+            if ($game_data['division_id'] > 0 && ! isset($_GET['division_id'])) {
+                $atts['division_id'] = $game_data['division_id'];
+            }
+        }
+
         return $atts;
+    }
+
+    private function extract_game_query_data($raw_value)
+    {
+        $raw = sanitize_text_field((string) $raw_value);
+        $raw = trim($raw);
+
+        if ($raw === '') {
+            return array(
+                'game_id' => '',
+                'division_id' => 0,
+            );
+        }
+
+        $parts = array_map('trim', explode(',', $raw));
+        $game_id = isset($parts[0]) ? $parts[0] : '';
+        $division_id = 0;
+
+        if (isset($parts[1]) && $parts[1] !== '' && ctype_digit($parts[1])) {
+            $division_id = intval($parts[1]);
+        }
+
+        return array(
+            'game_id' => $game_id,
+            'division_id' => $division_id,
+        );
     }
 
     private function normalize_query_game_link_pattern($game_link)
@@ -1027,6 +1303,10 @@ PHP;
 
     private function is_debug_enabled($atts, $settings)
     {
+        if (! current_user_can('manage_options')) {
+            return false;
+        }
+
         if (isset($_GET['esc_gamepitch_debug']) && $_GET['esc_gamepitch_debug'] === '1') {
             return true;
         }
@@ -1067,6 +1347,8 @@ PHP;
         $defaults = array(
             'api_key' => '',
             'division_id' => 0,
+            'division_ids' => '',
+            'season_divisions_json' => '',
             'default_team_id' => 0,
             'sport' => 'icehockey',
             'debug_comments' => 0,
