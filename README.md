@@ -94,6 +94,7 @@ A single-shortcode solution that renders a **Division Picker** above a **Schedul
 | `division_id` | plugin setting | Pre-selected division (optional) |
 | `team_id` | plugin setting | Focuses the schedule on one team (optional) |
 | `game_link` | `?game_id=%s` | Query-string pattern for game navigation; `%s` is replaced with the game ID |
+| `limit` | *(none)* | Maximum number of games shown in the schedule (`limit` option) |
 | `divisions` | *(none)* | JSON array `[{"divisionId":…,"divisionName":"…"},…]` to populate the picker |
 | `class` | *(none)* | Extra CSS class on the wrapper div |
 | `fallback_message` | *"Schedule is currently unavailable."* | Shown when the widget cannot load |
@@ -184,12 +185,36 @@ Result:
 ```
 
 ```text
+[esc_schedule limit="8"]
+```
+
+```text
+[esc_schedule mode="all"]
+```
+
+```text
+[esc_schedule mode="past"]
+```
+
+```text
+[esc_schedule mode="future"]
+```
+
+```text
 [esc_standings team_id="27"]
 ```
 
 ```text
 [esc_schedule debug="1"]
 ```
+
+The `esc_schedule` shortcode supports `mode="all|past|future"`.
+
+- `all` (default): shows all games.
+- `past`: shows only games before today.
+- `future`: shows today and upcoming games.
+
+Use `limit="N"` to cap the number of displayed schedule rows.
 
 ```text
 [esc_gamepitch

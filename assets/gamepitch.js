@@ -571,6 +571,103 @@
     };
   }
 
+  function getScheduleEntryTime(entry) {
+    if (!entry || typeof entry !== 'object') {
+      return null;
+    }
+
+    var dateCandidate = entry.scheduledDateTime || entry.dateTime || entry.startDateTime || entry.date;
+    if (typeof dateCandidate !== 'string' || !dateCandidate) {
+      return null;
+    }
+
+    var timestamp = Date.parse(dateCandidate);
+    if (isNaN(timestamp)) {
+      return null;
+    }
+
+    return timestamp;
+  }
+
+  function filterScheduleEntries(entries, mode) {
+    if (!Array.isArray(entries)) {
+      return entries;
+    }
+
+    var normalizedMode = typeof mode === 'string' ? mode.toLowerCase() : 'all';
+    if (normalizedMode !== 'past' && normalizedMode !== 'future') {
+      return entries;
+    }
+
+    var todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    var dayStartMs = todayStart.getTime();
+
+    return entries.filter(function (entry) {
+      var entryTime = getScheduleEntryTime(entry);
+
+      // Keep entries with unknown/invalid date to avoid dropping data accidentally.
+      if (entryTime === null) {
+        return true;
+      }
+
+      if (normalizedMode === 'past') {
+        return entryTime < dayStartMs;
+      }
+
+      // future mode includes the current gameday (today).
+      return entryTime >= dayStartMs;
+    });
+  }
+
+  function applyScheduleLimit(entries, limit) {
+    if (!Array.isArray(entries) || !Number.isFinite(limit) || limit <= 0) {
+      return entries;
+    }
+
+    return entries.slice(0, limit);
+  }
+
+  function applyScheduleModeFilter(node, payload, options) {
+    if (payload.widgetName !== 'hockeydata.los.Schedule') {
+      return;
+    }
+
+    var mode = typeof payload.scheduleMode === 'string' ? payload.scheduleMode.toLowerCase() : 'all';
+    var limit = Number(payload.scheduleLimit);
+    if ((mode !== 'past' && mode !== 'future') && !(Number.isFinite(limit) && limit > 0)) {
+      return;
+    }
+
+    var originalPaint = typeof options.paint === 'function' ? options.paint : null;
+
+    options.paint = function (result) {
+      try {
+        if (result && typeof result === 'object') {
+          if (Array.isArray(result.data)) {
+            result.data = applyScheduleLimit(filterScheduleEntries(result.data, mode), limit);
+          } else if (result.data && typeof result.data === 'object') {
+            if (Array.isArray(result.data.items)) {
+              result.data.items = applyScheduleLimit(filterScheduleEntries(result.data.items, mode), limit);
+            } else if (Array.isArray(result.data.games)) {
+              result.data.games = applyScheduleLimit(filterScheduleEntries(result.data.games, mode), limit);
+            }
+          }
+        }
+      } catch (err) {
+        // Never break widget rendering because of filtering.
+      }
+
+      if (originalPaint) {
+        try {
+          originalPaint.apply(this, arguments);
+        } catch (err) {
+          // Ignore callback errors from third-party/custom paint callbacks.
+        }
+      }
+    };
+  }
+
   function tryInitWidget(node) {
     var raw = node.getAttribute('data-esc-gamepitch');
     if (!raw) {
@@ -587,13 +684,12 @@
     }
 
     if (!window.hockeydata || !window.hockeydata.util || !window.hockeydata.util.Widget) {
-      debugLog(payload, 'error', 'ESC GamePitch: HockeyData API is not loaded.');
-      showFallback(node, payload && payload.fallbackMessage);
+      debugLog(payload, 'info', 'ESC GamePitch: HockeyData API is not loaded yet; initialization will retry.');
       return;
     }
 
     var options = payload.widgetOptions || {};
-  applyWidgetDefaults(node, payload, options);
+    applyWidgetDefaults(node, payload, options);
 
     if (payload.widgetName === 'hockeydata.los.DivisionPicker') {
       applyDivisionPickerSeasonEnhancements(node, payload, options);
@@ -611,6 +707,7 @@
     options.widgetName = payload.widgetName;
     applySafeErrorHandling(node, payload, options);
     applyGameTickerCurrentOnly(node, payload, options);
+    applyScheduleModeFilter(node, payload, options);
 
     try {
       // HockeyData widgets are instantiated via hockeydata.util.Widget(options).
@@ -634,9 +731,78 @@
     }
   }
 
+  var initScheduled = false;
+
+  function queueInitAll() {
+    if (initScheduled) {
+      return;
+    }
+
+    initScheduled = true;
+    window.setTimeout(function () {
+      initScheduled = false;
+      initAll();
+    }, 30);
+  }
+
+  function watchForEscGamePitchNodes() {
+    if (!window.MutationObserver || !document.body) {
+      return;
+    }
+
+    var observer = new window.MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i += 1) {
+        var mutation = mutations[i];
+
+        if (mutation.type === 'attributes') {
+          if (mutation.target && mutation.target.matches && mutation.target.matches('.esc-gamepitch-widget[data-esc-gamepitch]')) {
+            queueInitAll();
+            return;
+          }
+          continue;
+        }
+
+        if (!mutation.addedNodes || mutation.addedNodes.length === 0) {
+          continue;
+        }
+
+        for (var j = 0; j < mutation.addedNodes.length; j += 1) {
+          var addedNode = mutation.addedNodes[j];
+          if (!addedNode || addedNode.nodeType !== 1) {
+            continue;
+          }
+
+          if (addedNode.matches && addedNode.matches('.esc-gamepitch-widget[data-esc-gamepitch]')) {
+            queueInitAll();
+            return;
+          }
+
+          if (addedNode.querySelector && addedNode.querySelector('.esc-gamepitch-widget[data-esc-gamepitch]')) {
+            queueInitAll();
+            return;
+          }
+        }
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-esc-gamepitch']
+    });
+  }
+
+  window.escGamePitchInitAll = initAll;
+  window.escGamePitchQueueInit = queueInitAll;
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAll);
+    document.addEventListener('DOMContentLoaded', function () {
+      initAll();
+      watchForEscGamePitchNodes();
+    });
   } else {
     initAll();
+    watchForEscGamePitchNodes();
   }
 })(window.jQuery);
