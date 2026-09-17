@@ -35,8 +35,15 @@
     return {
       api_key: { type: 'string', default: '' },
       division_id: { type: 'string', default: '' },
+      divisions: { type: 'string', default: '' },
+      widgets: { type: 'string', default: '' },
+      stats_preset: { type: 'string', default: 'basic' },
+      tabs: { type: 'string', default: '' },
+      game_link: { type: 'string', default: '' },
       team_id: { type: 'string', default: '' },
       game_id: { type: 'string', default: '' },
+      mode: { type: 'string', default: 'all' },
+      limit: { type: 'string', default: '' },
       widget_name: { type: 'string', default: preset.widget_name || '' },
       js_modules: { type: 'string', default: preset.js_modules || '' },
       css_modules: { type: 'string', default: preset.css_modules || '' },
@@ -57,7 +64,7 @@
       edit: function (props) {
         var attrs = props.attributes;
         var optionsError = getOptionsError(attrs.options || '{}');
-        var showPrereqHint = !attrs.api_key && !attrs.division_id;
+        var showPrereqHint = false;
 
         var previewNode;
         if (optionsError) {
@@ -73,6 +80,12 @@
           });
         } else {
           previewNode = el('p', null, __('Live preview is not available in this editor.', 'esc-gamepitch'));
+        }
+
+        if (typeof window.escGamePitchQueueInit === 'function') {
+          window.escGamePitchQueueInit();
+        } else if (typeof window.escGamePitchInitAll === 'function') {
+          window.setTimeout(window.escGamePitchInitAll, 0);
         }
 
         return el(
@@ -96,6 +109,40 @@
                 value: attrs.division_id || '',
                 onChange: function (value) { props.setAttributes({ division_id: value }); }
               }),
+              el(components.TextareaControl, {
+                label: __('Divisions JSON (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Optional array/object for DivisionPicker. Object keys can represent seasons.', 'esc-gamepitch'),
+                value: attrs.divisions || '',
+                onChange: function (value) { props.setAttributes({ divisions: value }); }
+              }),
+              el(components.TextareaControl, {
+                label: __('Widgets JSON (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Optional widgets array for DivisionPicker tabs/content.', 'esc-gamepitch'),
+                value: attrs.widgets || '',
+                onChange: function (value) { props.setAttributes({ widgets: value }); }
+              }),
+              el(components.SelectControl, {
+                label: __('Stats Preset (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Applies only when Widgets JSON is empty.', 'esc-gamepitch'),
+                value: attrs.stats_preset || 'basic',
+                options: [
+                  { label: __('Basic (Standings + Schedule)', 'esc-gamepitch'), value: 'basic' },
+                  { label: __('Extended (+ TeamStats + Leaders)', 'esc-gamepitch'), value: 'extended' }
+                ],
+                onChange: function (value) { props.setAttributes({ stats_preset: value }); }
+              }),
+              el(components.TextControl, {
+                label: __('Tabs (DivisionPicker)', 'esc-gamepitch'),
+                help: __('Optional boolean: 1/0, true/false.', 'esc-gamepitch'),
+                value: attrs.tabs || '',
+                onChange: function (value) { props.setAttributes({ tabs: value }); }
+              }),
+              el(components.TextControl, {
+                label: __('Game Link Pattern', 'esc-gamepitch'),
+                help: __('Optional rowLink pattern like ?game_id=%s&division_id=%s for schedule rows.', 'esc-gamepitch'),
+                value: attrs.game_link || '',
+                onChange: function (value) { props.setAttributes({ game_link: value }); }
+              }),
               el(components.TextControl, {
                 label: __('Team ID Focus', 'esc-gamepitch'),
                 help: __('Optional. Highlights/focuses a specific team when supported by the widget.', 'esc-gamepitch'),
@@ -107,6 +154,23 @@
                 value: attrs.game_id || '',
                 onChange: function (value) { props.setAttributes({ game_id: value }); }
               }),
+              config.name === 'esc/schedule' ? el(components.SelectControl, {
+                label: __('Schedule Mode', 'esc-gamepitch'),
+                help: __('all = all games, past = only past games, future = today and upcoming games.', 'esc-gamepitch'),
+                value: attrs.mode || 'all',
+                options: [
+                  { label: __('All', 'esc-gamepitch'), value: 'all' },
+                  { label: __('Past', 'esc-gamepitch'), value: 'past' },
+                  { label: __('Future', 'esc-gamepitch'), value: 'future' }
+                ],
+                onChange: function (value) { props.setAttributes({ mode: value || 'all' }); }
+              }) : null,
+              config.name === 'esc/schedule' ? el(components.TextControl, {
+                label: __('Schedule Limit', 'esc-gamepitch'),
+                help: __('Maximum number of games to display. Uses HockeyData option "limit".', 'esc-gamepitch'),
+                value: attrs.limit || '',
+                onChange: function (value) { props.setAttributes({ limit: value }); }
+              }) : null,
               el(components.TextControl, {
                 label: __('Widget Class', 'esc-gamepitch'),
                 help: __('Leave empty to use block default.', 'esc-gamepitch'),
@@ -152,12 +216,12 @@
           showPrereqHint ? el(
             components.Notice,
             { status: 'warning', isDismissible: false },
-            __('Preview needs API key and division ID from plugin settings or overrides. Sport is fixed to icehockey.', 'esc-gamepitch')
+            __('Preview uses plugin settings by default; use overrides only when needed. Sport is fixed to icehockey.', 'esc-gamepitch')
           ) : null,
           el('h4', null, __('Preview', 'esc-gamepitch')),
           previewNode,
           el('p', null, __('Shortcode equivalent:', 'esc-gamepitch')),
-          el('code', null, '[' + config.shortcodeTag + (attrs.game_id ? ' game_id="' + attrs.game_id + '"' : '') + (attrs.team_id ? ' team_id="' + attrs.team_id + '"' : '') + ']')
+          el('code', null, '[' + config.shortcodeTag + (attrs.game_id ? ' game_id="' + attrs.game_id + '"' : '') + (attrs.team_id ? ' team_id="' + attrs.team_id + '"' : '') + ((config.name === 'esc/divisionpicker' && attrs.stats_preset) ? ' stats_preset="' + attrs.stats_preset + '"' : '') + ((config.name === 'esc/schedule' && attrs.mode && attrs.mode !== 'all') ? ' mode="' + attrs.mode + '"' : '') + ((config.name === 'esc/schedule' && attrs.limit) ? ' limit="' + attrs.limit + '"' : '') + ']')
         );
       },
 
@@ -226,8 +290,9 @@
     icon: 'filter',
     preset: {
       widget_name: 'hockeydata.los.DivisionPicker',
-      js_modules: 'los_divisionpicker',
-      css_modules: 'los_divisionpicker'
+      stats_preset: 'basic',
+      js_modules: 'los_divisionpicker&los_standings&los_schedule&los_game_fullreport&los_teamstats&los_leaders&los_configuration_icehockey',
+      css_modules: 'los_divisionpicker&los_template_default&los_game_fullreport&los_teamstats&los_leaders'
     }
   });
 
@@ -277,6 +342,7 @@
       division_id: { type: 'string', default: '' },
       team_id: { type: 'string', default: '' },
       game_link: { type: 'string', default: '' },
+      limit: { type: 'string', default: '' },
       divisions: { type: 'string', default: '' },
       class: { type: 'string', default: '' },
       fallback_message: { type: 'string', default: 'Schedule is currently unavailable.' }
@@ -291,13 +357,19 @@
 
       edit: function (props) {
         var attrs = props.attributes;
-        var showPrereqHint = !attrs.api_key && !attrs.division_id;
+        var showPrereqHint = false;
 
         var previewNode;
         if (ServerSideRender) {
           previewNode = el(ServerSideRender, { block: 'esc/division-schedule', attributes: attrs });
         } else {
           previewNode = el('p', null, __('Live preview is not available in this editor.', 'esc-gamepitch'));
+        }
+
+        if (typeof window.escGamePitchQueueInit === 'function') {
+          window.escGamePitchQueueInit();
+        } else if (typeof window.escGamePitchInitAll === 'function') {
+          window.setTimeout(window.escGamePitchInitAll, 0);
         }
 
         return el(
@@ -333,6 +405,12 @@
                 value: attrs.game_link || '',
                 onChange: function (v) { props.setAttributes({ game_link: v }); }
               }),
+              el(components.TextControl, {
+                label: __('Schedule Limit', 'esc-gamepitch'),
+                help: __('Maximum number of games to display in the schedule.', 'esc-gamepitch'),
+                value: attrs.limit || '',
+                onChange: function (v) { props.setAttributes({ limit: v }); }
+              }),
               el(components.TextareaControl, {
                 label: __('Divisions JSON', 'esc-gamepitch'),
                 help: __('Optional JSON array of {divisionId, divisionName} objects to populate the picker.', 'esc-gamepitch'),
@@ -354,13 +432,14 @@
           showPrereqHint ? el(
             components.Notice,
             { status: 'warning', isDismissible: false },
-            __('Preview needs API key and division ID from plugin settings or overrides.', 'esc-gamepitch')
+            __('Preview uses plugin settings by default; use overrides only when needed.', 'esc-gamepitch')
           ) : null,
           el('h4', null, __('Preview', 'esc-gamepitch')),
           previewNode,
           el('p', null, __('Shortcode equivalent:', 'esc-gamepitch')),
           el('code', null, '[esc_division_schedule' +
             (attrs.game_link ? ' game_link="' + attrs.game_link + '"' : '') +
+            (attrs.limit ? ' limit="' + attrs.limit + '"' : '') +
             (attrs.team_id ? ' team_id="' + attrs.team_id + '"' : '') +
             ']')
         );

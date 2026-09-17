@@ -19,13 +19,52 @@ Dedicated shortcodes are available for every supported widget — they set the c
 | Shortcode | Widget class |
 |---|---|
 | `[esc_game_livebox]` | `hockeydata.los.Game.LiveBox` |
-| `[esc_divisionpicker]` | `hockeydata.los.DivisionPicker` |
+| `[esc_divisionpicker]` | `hockeydata.los.DivisionPicker` (default: tabs with Standings + Schedule) |
 | `[esc_gameticker]` | `hockeydata.los.GameTicker` |
+| `[esc_gameticker_current]` | `hockeydata.los.GameTicker` (only visible when current games are detected) |
 | `[esc_gameslider]` | `hockeydata.los.GameSlider` |
 | `[esc_livegames]` | `hockeydata.los.LiveGames` |
 | `[esc_schedule]` | `hockeydata.los.Schedule` |
 | `[esc_standings]` | `hockeydata.los.Standings` |
 | `[esc_division_schedule]` | DivisionPicker + Schedule composite |
+
+### esc_divisionpicker
+
+`[esc_divisionpicker]` now supports season-aware division configuration and loads useful defaults for statistics across current and past seasons.
+
+- Default output (if no custom `widget`/`widgets` provided):
+  - `Standings` (long columns)
+  - `Schedule`
+  - `Game.FullReport` (reads `game_id` from URL)
+  - rendered in tabs
+- Optional `stats_preset="extended"` adds `TeamStats` and `Leaders` tabs.
+- Supports `divisions` as JSON array or grouped JSON object (group keys can be season labels).
+
+Examples:
+
+```text
+[esc_divisionpicker]
+```
+
+```text
+[esc_divisionpicker
+  divisions='{"2025/26":[{"divisionId":13,"divisionName":"Grunddurchgang"},{"divisionId":27,"divisionName":"Playoffs"}],"2024/25":[{"divisionId":44,"divisionName":"Grunddurchgang"},{"divisionId":52,"divisionName":"Playoffs"}]}'
+  game_link="?game_id=%s&division_id=%s"
+  team_id="27"]
+```
+
+```text
+[esc_divisionpicker
+  widgets='[{"title":"Standings","widget":"hockeydata.los.Standings","widgetOptions":{"columnSet":"long"}},{"title":"Schedule","widget":"hockeydata.los.Schedule","widgetOptions":{"rowLink":"?game_id=%s&division_id=%s"}},{"title":"Game Report","widget":"hockeydata.los.Game.FullReport","widgetOptions":{"gameIdUrlParameter":"game_id"}}]'
+  tabs="1"]
+```
+
+```text
+[esc_divisionpicker
+  stats_preset="extended"
+  divisions='{"2025/26":[{"divisionId":13,"divisionName":"Grunddurchgang"}],"2024/25":[{"divisionId":44,"divisionName":"Grunddurchgang"}]}'
+  team_id="27"]
+```
 
 ### esc_division_schedule
 
@@ -55,6 +94,7 @@ A single-shortcode solution that renders a **Division Picker** above a **Schedul
 | `division_id` | plugin setting | Pre-selected division (optional) |
 | `team_id` | plugin setting | Focuses the schedule on one team (optional) |
 | `game_link` | `?game_id=%s` | Query-string pattern for game navigation; `%s` is replaced with the game ID |
+| `limit` | *(none)* | Maximum number of games shown in the schedule (`limit` option) |
 | `divisions` | *(none)* | JSON array `[{"divisionId":…,"divisionName":"…"},…]` to populate the picker |
 | `class` | *(none)* | Extra CSS class on the wrapper div |
 | `fallback_message` | *"Schedule is currently unavailable."* | Shown when the widget cannot load |
@@ -129,6 +169,10 @@ Result:
 ```
 
 ```text
+[esc_gameticker_current division_id="42"]
+```
+
+```text
 [esc_livegames]
 ```
 
@@ -141,12 +185,36 @@ Result:
 ```
 
 ```text
+[esc_schedule limit="8"]
+```
+
+```text
+[esc_schedule mode="all"]
+```
+
+```text
+[esc_schedule mode="past"]
+```
+
+```text
+[esc_schedule mode="future"]
+```
+
+```text
 [esc_standings team_id="27"]
 ```
 
 ```text
 [esc_schedule debug="1"]
 ```
+
+The `esc_schedule` shortcode supports `mode="all|past|future"`.
+
+- `all` (default): shows all games.
+- `past`: shows only games before today.
+- `future`: shows today and upcoming games.
+
+Use `limit="N"` to cap the number of displayed schedule rows.
 
 ```text
 [esc_gamepitch
@@ -197,6 +265,13 @@ Each block shares the same sidebar controls:
 - **CSS Class**, **Fallback Message**.
 
 All blocks are server-rendered and produce the same output as their shortcode equivalents. A live server-side preview is shown directly in the block editor. Options JSON is validated and an error notice appears when the JSON is invalid.
+
+For DivisionPicker blocks, additional inspector fields are available:
+
+- `Divisions JSON` (array/object, including grouped seasons)
+- `Widgets JSON`
+- `Tabs`
+- `Game Link Pattern`
 
 ## Failover Mode
 
