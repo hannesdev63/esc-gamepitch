@@ -14,19 +14,63 @@ The generic shortcode accepts any HockeyData widget class:
 
 Dedicated shortcodes are available for every supported widget — they set the correct widget class, JS and CSS modules automatically. All accept the same optional overrides (`team_id`, `division_id`, `api_key`, `options`, `class`, `fallback_message`, `debug`).
 
+For slider shortcodes (`[esc-slider]`, `[esc_gameslider]`), `scroll` is supported (`1` by default). Use `scroll="0"` to disable horizontal scrolling.
+
+Additional optional slider parameters:
+- `show_live_time` (boolean, default `0`) — if `1`, show current live game time in minutes.
+- `show_period_bar` (boolean, default `0`) — if `1`, show game-period progress bar.
+
 ### Dedicated shortcodes
 
 | Shortcode | Widget class |
 |---|---|
 | `[esc_game_livebox]` | `hockeydata.los.Game.LiveBox` |
+| `[esc-live]` | `hockeydata.los.Game.LiveBox` (shows live game for a division/team, falls back to custom message if configured) |
+| `[esc-slider]` | `hockeydata.los.GameSlider` (shows all currently active games in the configured league/division, nothing if no live game) |
 | `[esc_divisionpicker]` | `hockeydata.los.DivisionPicker` (default: tabs with Standings + Schedule) |
 | `[esc_gameticker]` | `hockeydata.los.GameTicker` |
 | `[esc_gameticker_current]` | `hockeydata.los.GameTicker` (only visible when current games are detected) |
-| `[esc_gameslider]` | `hockeydata.los.GameSlider` |
+| `[esc_gameslider]` | `hockeydata.los.GameSlider` (league/division-level slider, team filter ignored) |
 | `[esc_livegames]` | `hockeydata.los.LiveGames` |
 | `[esc_schedule]` | `hockeydata.los.Schedule` |
 | `[esc_standings]` | `hockeydata.los.Standings` |
 | `[esc_division_schedule]` | DivisionPicker + Schedule composite |
+
+### Live game shortcodes
+
+These shortcodes resolve the currently active game and render the matching HockeyData widget only when a game is live.
+
+```text
+[esc-live division_id="42" team_id="27"]
+```
+
+```text
+[esc-live team_id="27" fallback_message="No live game is currently active."]
+```
+
+`[esc-live]` uses `auto_reload="1"` by default so live-state probing refreshes automatically.
+
+```text
+[esc-live auto_reload="0"]
+```
+
+```text
+[esc-slider division_id="42"]
+```
+
+```text
+[esc-slider]
+```
+
+```text
+[esc-slider scroll="0"]
+```
+
+```text
+[esc-slider show_live_time="1" show_period_bar="1"]
+```
+
+The live resolvers look for current games in the HockeyData GameTicker feed and only render the widget when matching live data is found. For `[esc-slider]`, team filters are intentionally ignored so the slider can show all active games in the configured league/division. If none are active, the element is hidden and no message is shown; admin debug output remains available when enabled. `[esc_gameslider]` also ignores team filters and renders at league/division scope.
 
 ### esc_divisionpicker
 
@@ -165,6 +209,14 @@ Result:
 ```
 
 ```text
+[esc-slider team_id="27"]
+```
+
+```text
+[esc-live team_id="27" fallback_message="No live game currently active."]
+```
+
+```text
 [esc_gameticker division_id="42" options='{"futureOnly":true}']
 ```
 
@@ -247,6 +299,8 @@ Every widget has a matching Gutenberg block. Add them from the block inserter un
 |---|---|---|
 | ESC GamePitch | `esc/gamepitch` | `[esc_gamepitch]` |
 | ESC Game LiveBox | `esc/game-livebox` | `[esc_game_livebox]` |
+| ESC Live | `esc/live` | `[esc-live]` |
+| ESC Slider | `esc/slider` | `[esc-slider]` |
 | ESC Division Picker | `esc/divisionpicker` | `[esc_divisionpicker]` |
 | ESC Game Ticker | `esc/gameticker` | `[esc_gameticker]` |
 | ESC Game Slider | `esc/gameslider` | `[esc_gameslider]` |

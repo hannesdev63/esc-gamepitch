@@ -3,7 +3,7 @@
  * Plugin Name: ESC GamePitch
  * Plugin URI:        https://github.com/hannesdev63/esc-gamepitch
  * Description: Renders HockeyData GamePitch widgets via shortcode using the HockeyData JavaScript API.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: hannesdev63
  * Requires at least: 5.9
  * Requires PHP:      7.4
@@ -19,7 +19,7 @@ if (! defined('ABSPATH')) {
 final class ESC_GamePitch_Plugin
 {
     const OPTION_KEY = 'esc_gamepitch_settings';
-    const VERSION    = '1.0.1';
+    const VERSION    = '1.0.2';
 
     private static $instance = null;
 
@@ -37,6 +37,10 @@ final class ESC_GamePitch_Plugin
         add_shortcode('esc_schedule', array($this, 'render_schedule_shortcode'));
         add_shortcode('esc_standings', array($this, 'render_standings_shortcode'));
         add_shortcode('esc_game_livebox', array($this, 'render_game_livebox_shortcode'));
+        add_shortcode('esc-slider', array($this, 'render_slider_shortcode'));
+        add_shortcode('esc_slider', array($this, 'render_slider_shortcode'));
+        add_shortcode('esc-live', array($this, 'render_live_shortcode'));
+        add_shortcode('esc_live', array($this, 'render_live_shortcode'));
         add_shortcode('esc_divisionpicker', array($this, 'render_divisionpicker_shortcode'));
         add_shortcode('esc_gameticker', array($this, 'render_gameticker_shortcode'));
         add_shortcode('esc_gameticker_current', array($this, 'render_gameticker_current_shortcode'));
@@ -120,6 +124,10 @@ final class ESC_GamePitch_Plugin
             'css_modules' => array('type' => 'string', 'default' => ''),
             'class' => array('type' => 'string', 'default' => ''),
             'options' => array('type' => 'string', 'default' => '{}'),
+            'scroll' => array('type' => 'string', 'default' => '1'),
+            'show_live_time' => array('type' => 'string', 'default' => '0'),
+            'show_period_bar' => array('type' => 'string', 'default' => '0'),
+            'auto_reload' => array('type' => 'string', 'default' => '0'),
             'fallback_message' => array('type' => 'string', 'default' => 'Live game data is currently unavailable.'),
         );
 
@@ -139,6 +147,16 @@ final class ESC_GamePitch_Plugin
         ));
 
         register_block_type('esc/game-livebox', array(
+            'render_callback' => array($this, 'render_block'),
+            'attributes' => $attributes,
+        ));
+
+        register_block_type('esc/live', array(
+            'render_callback' => array($this, 'render_block'),
+            'attributes' => $attributes,
+        ));
+
+        register_block_type('esc/slider', array(
             'render_callback' => array($this, 'render_block'),
             'attributes' => $attributes,
         ));
@@ -225,11 +243,23 @@ final class ESC_GamePitch_Plugin
                 'js_modules' => 'los_standings&los_configuration_icehockey',
                 'css_modules' => 'los_template_default',
             ));
-        } elseif ($block_name === 'esc/game-livebox') {
+        } elseif ($block_name === 'esc/game-livebox' || $block_name === 'esc/live') {
             $atts = wp_parse_args($atts, array(
                 'widget_name' => 'hockeydata.los.Game.LiveBox',
                 'js_modules' => 'los_game_livebox',
-                'css_modules' => 'los_game_livebox',
+                'css_modules' => 'los_game_livebox&los_template_default',
+                'live_resolver' => $block_name === 'esc/live' ? '1' : '0',
+                'auto_reload' => $block_name === 'esc/live' ? '1' : '0',
+            ));
+        } elseif ($block_name === 'esc/slider') {
+            $atts = wp_parse_args($atts, array(
+                'widget_name' => 'hockeydata.los.GameSlider',
+                'js_modules' => 'los_gameslider',
+                'css_modules' => 'los_gameslider',
+                'live_resolver' => '1',
+                'ignore_team_id' => '1',
+                'auto_reload' => '1',
+                'fallback_message' => '',
             ));
         } elseif ($block_name === 'esc/divisionpicker') {
             $atts = wp_parse_args($atts, array(
@@ -821,16 +851,27 @@ PHP;
             'current_only' => '0',
             'mode' => 'all',
             'limit' => '',
+            'live_resolver' => '0',
+            'ignore_team_id' => '0',
+            'scroll' => '1',
+            'show_live_time' => '0',
+            'show_period_bar' => '0',
+            'auto_reload' => '0',
             'fallback_message' => 'Live game data is currently unavailable.',
         );
 
+        $raw_atts = is_array($atts) ? $atts : array();
         $atts = shortcode_atts($defaults, $atts, 'esc_gamepitch');
         $atts = $this->apply_query_id_overrides($atts);
 
         $api_key = sanitize_text_field((string) $atts['api_key']);
-        $division_id = intval($atts['division_id']);
+        $division_id = trim((string) $atts['division_id']) === '' ? intval($settings['division_id']) : intval($atts['division_id']);
         $sport = 'icehockey';
-        $team_id = intval($atts['team_id']);
+        $team_id = trim((string) $atts['team_id']) === '' ? intval($settings['default_team_id']) : intval($atts['team_id']);
+        $ignore_team_id = isset($atts['ignore_team_id']) && in_array(strtolower((string) $atts['ignore_team_id']), array('1', 'true', 'yes', 'on'), true);
+        if ($ignore_team_id) {
+            $team_id = 0;
+        }
         $widget_name = sanitize_text_field((string) $atts['widget_name']);
         $game_id = isset($atts['game_id']) ? trim((string) $atts['game_id']) : '';
         $js_modules = $this->sanitize_modules((string) $atts['js_modules']);
@@ -845,18 +886,34 @@ PHP;
         if ($schedule_limit < 0) {
             $schedule_limit = 0;
         }
+        $scroll_enabled = isset($atts['scroll']) && in_array(strtolower((string) $atts['scroll']), array('1', 'true', 'yes', 'on'), true);
+        $show_live_time = isset($atts['show_live_time']) && in_array(strtolower((string) $atts['show_live_time']), array('1', 'true', 'yes', 'on'), true);
+        $show_period_bar = isset($atts['show_period_bar']) && in_array(strtolower((string) $atts['show_period_bar']), array('1', 'true', 'yes', 'on'), true);
+        $auto_reload = isset($atts['auto_reload']) && in_array(strtolower((string) $atts['auto_reload']), array('1', 'true', 'yes', 'on'), true);
 
-        if ($schedule_mode !== 'all' || $schedule_limit > 0 || array_key_exists('mode', $atts) || array_key_exists('limit', $atts)) {
+        $mode_was_explicit = array_key_exists('mode', $raw_atts);
+        $limit_was_explicit = array_key_exists('limit', $raw_atts);
+        if ($schedule_mode !== 'all' || $schedule_limit > 0 || $mode_was_explicit || $limit_was_explicit) {
             $widget_name = 'hockeydata.los.Schedule';
         }
 
         $fallback_message = sanitize_text_field((string) $atts['fallback_message']);
+        $live_resolver = isset($atts['live_resolver']) && in_array(strtolower((string) $atts['live_resolver']), array('1', 'true', 'yes', 'on'), true);
+
+        if ($widget_name === 'hockeydata.los.Game.LiveBox') {
+            $css_modules = $this->append_module($css_modules, 'los_template_default');
+        }
+
+        if (($widget_name === 'hockeydata.los.Game.LiveBox' || $widget_name === 'hockeydata.los.GameSlider') && $live_resolver && $game_id === '') {
+            $js_modules = $this->append_module($js_modules, 'los_gameticker');
+        }
 
         // DivisionPicker, GameSlider and LiveGames can resolve divisionId from the URL at runtime.
         $division_optional = in_array($widget_name, array(
             'hockeydata.los.DivisionPicker',
             'hockeydata.los.GameSlider',
             'hockeydata.los.LiveGames',
+            'hockeydata.los.Game.LiveBox',
         ), true);
 
         if ($api_key === '' || (! $division_optional && $division_id <= 0) || $sport === '') {
@@ -879,6 +936,19 @@ PHP;
         }
 
         $widget_options = array_merge($base_options, $custom_options);
+
+        if (! isset($widget_options['autoReload'])) {
+            $widget_options['autoReload'] = $auto_reload;
+        }
+
+        if ($widget_name === 'hockeydata.los.GameSlider') {
+            if (! isset($widget_options['showLiveTime'])) {
+                $widget_options['showLiveTime'] = $show_live_time;
+            }
+            if (! isset($widget_options['showPeriodBar'])) {
+                $widget_options['showPeriodBar'] = $show_period_bar;
+            }
+        }
 
         if ($game_id !== '' && strpos($widget_name, 'hockeydata.los.Game.') === 0) {
             $widget_options['gameId'] = $game_id;
@@ -1029,6 +1099,14 @@ PHP;
             'debugAllowed' => current_user_can('manage_options'),
         );
 
+        if (($widget_name === 'hockeydata.los.Game.LiveBox' || $widget_name === 'hockeydata.los.GameSlider') && $live_resolver && $game_id === '') {
+            $payload['liveResolver'] = true;
+        }
+
+        if ($widget_name === 'hockeydata.los.GameSlider') {
+            $payload['sliderScroll'] = $scroll_enabled;
+        }
+
         if ($widget_name === 'hockeydata.los.GameTicker' && $current_only) {
             $payload['onlyWhenCurrent'] = true;
         }
@@ -1063,8 +1141,68 @@ PHP;
         return $this->render_preset_shortcode($atts, array(
             'widget_name' => 'hockeydata.los.Game.LiveBox',
             'js_modules' => 'los_game_livebox',
-            'css_modules' => 'los_game_livebox',
+            'css_modules' => 'los_game_livebox&los_template_default',
         ));
+    }
+
+    public function render_live_shortcode($atts)
+    {
+        if (! is_array($atts)) {
+            $atts = array();
+        }
+
+        $settings = $this->get_settings();
+        $defaults = array(
+            'api_key' => $settings['api_key'],
+            'division_id' => $settings['division_id'],
+            'team_id' => $settings['default_team_id'],
+            'game_id' => '',
+            'class' => '',
+            'debug' => '0',
+            'live_resolver' => '1',
+            'auto_reload' => '1',
+            'fallback_message' => 'No live game is currently active.',
+            'widget_name' => 'hockeydata.los.Game.LiveBox',
+            'js_modules' => 'los_game_livebox',
+            'css_modules' => 'los_game_livebox&los_template_default',
+        );
+
+        $atts = shortcode_atts($defaults, $atts, 'esc-live');
+        $atts = $this->apply_query_id_overrides($atts);
+
+        return $this->render_shortcode($atts);
+    }
+
+    public function render_slider_shortcode($atts)
+    {
+        if (! is_array($atts)) {
+            $atts = array();
+        }
+
+        $settings = $this->get_settings();
+        $defaults = array(
+            'api_key' => $settings['api_key'],
+            'division_id' => $settings['division_id'],
+            'team_id' => '',
+            'game_id' => '',
+            'class' => '',
+            'debug' => '0',
+            'live_resolver' => '1',
+            'ignore_team_id' => '1',
+            'auto_reload' => '1',
+            'scroll' => '1',
+            'show_live_time' => '0',
+            'show_period_bar' => '0',
+            'fallback_message' => '',
+            'widget_name' => 'hockeydata.los.GameSlider',
+            'js_modules' => 'los_gameslider',
+            'css_modules' => 'los_gameslider',
+        );
+
+        $atts = shortcode_atts($defaults, $atts, 'esc-slider');
+        $atts = $this->apply_query_id_overrides($atts);
+
+        return $this->render_shortcode($atts);
     }
 
     public function render_divisionpicker_shortcode($atts)
@@ -1098,11 +1236,32 @@ PHP;
 
     public function render_gameslider_shortcode($atts)
     {
-        return $this->render_preset_shortcode($atts, array(
+        if (! is_array($atts)) {
+            $atts = array();
+        }
+
+        $settings = $this->get_settings();
+        $defaults = array(
+            'api_key' => $settings['api_key'],
+            'division_id' => $settings['division_id'],
+            'team_id' => '',
+            'game_id' => '',
+            'class' => '',
+            'debug' => '0',
+            'ignore_team_id' => '1',
+            'auto_reload' => '1',
+            'scroll' => '1',
+            'show_live_time' => '0',
+            'show_period_bar' => '0',
             'widget_name' => 'hockeydata.los.GameSlider',
             'js_modules' => 'los_gameslider',
             'css_modules' => 'los_gameslider',
-        ));
+        );
+
+        $atts = shortcode_atts($defaults, $atts, 'esc_gameslider');
+        $atts = $this->apply_query_id_overrides($atts);
+
+        return $this->render_shortcode($atts);
     }
 
     public function render_livegames_shortcode($atts)
@@ -1141,8 +1300,8 @@ PHP;
         $atts = $this->apply_query_id_overrides($atts);
 
         $api_key          = sanitize_text_field((string) $atts['api_key']);
-        $division_id      = intval($atts['division_id']);
-        $team_id          = intval($atts['team_id']);
+        $division_id      = trim((string) $atts['division_id']) === '' ? intval($settings['division_id']) : intval($atts['division_id']);
+        $team_id          = trim((string) $atts['team_id']) === '' ? intval($settings['default_team_id']) : intval($atts['team_id']);
         $game_link        = $this->normalize_query_game_link_pattern(sanitize_text_field((string) $atts['game_link']));
         $schedule_limit   = isset($atts['limit']) ? intval($atts['limit']) : 0;
         $debug_enabled    = $this->is_debug_enabled($atts, $settings);
@@ -1316,6 +1475,29 @@ PHP;
         }
 
         return implode('&', array_filter($clean));
+    }
+
+    private function append_module($modules, $module)
+    {
+        $parts = array_filter(array_map('trim', explode('&', (string) $modules)));
+        $normalized = sanitize_key((string) $module);
+        if ($normalized === '') {
+            return $this->sanitize_modules((string) $modules);
+        }
+
+        $exists = false;
+        foreach ($parts as $part) {
+            if (sanitize_key((string) $part) === $normalized) {
+                $exists = true;
+                break;
+            }
+        }
+
+        if (! $exists) {
+            $parts[] = $normalized;
+        }
+
+        return $this->sanitize_modules(implode('&', $parts));
     }
 
     private function decode_json_attribute($value)

@@ -283,6 +283,20 @@
   });
 
   registerEscBlock({
+    name: 'esc/live',
+    title: 'ESC Live',
+    description: 'Shows the current live game for the selected team or division and falls back to a custom message when none is active.',
+    shortcodeTag: 'esc-live',
+    icon: 'video-alt3',
+    preset: {
+      widget_name: 'hockeydata.los.Game.LiveBox',
+      js_modules: 'los_game_livebox',
+      css_modules: 'los_game_livebox',
+      live_resolver: '1'
+    }
+  });
+
+  registerEscBlock({
     name: 'esc/divisionpicker',
     title: 'ESC Division Picker',
     description: 'Drop-down to select a division and reload linked widgets.',

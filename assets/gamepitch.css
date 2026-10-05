@@ -2,6 +2,48 @@
   width: 100%;
   max-width: 100%;
   margin: 0;
+  display: block;
+  overflow: visible;
+  min-height: 0;
+}
+
+.esc-gamepitch-widget > * {
+  max-width: 100%;
+  overflow: visible;
+}
+
+.esc-gamepitch-widget .hockeydata-los-gameslider,
+.esc-gamepitch-widget .hockeydata-los-game-slider,
+.esc-gamepitch-widget .hockeydata-los-game-slider-wrapper {
+  overflow: visible !important;
+  max-width: 100%;
+  min-height: 0;
+}
+
+.esc-gamepitch-widget.esc-gamepitch-slider-scroll .hockeydata-los-gameslider,
+.esc-gamepitch-widget.esc-gamepitch-slider-scroll .hockeydata-los-game-slider-wrapper {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.esc-gamepitch-widget.esc-gamepitch-slider-scroll {
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.esc-gamepitch-widget.esc-gamepitch-slider-scroll .hockeydata-los-gameslider,
+.esc-gamepitch-widget.esc-gamepitch-slider-scroll .hockeydata-los-game-slider,
+.esc-gamepitch-widget.esc-gamepitch-slider-scroll .hockeydata-los-game-slider-wrapper {
+  min-width: max-content;
+}
+
+.esc-gamepitch-widget.esc-gamepitch-slider-no-scroll .hockeydata-los-gameslider,
+.esc-gamepitch-widget.esc-gamepitch-slider-no-scroll .hockeydata-los-game-slider-wrapper {
+  overflow-x: visible !important;
 }
 
 .esc-gamepitch-error {
