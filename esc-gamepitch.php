@@ -1161,7 +1161,7 @@ PHP;
             'debug' => '0',
             'live_resolver' => '1',
             'auto_reload' => '1',
-            'fallback_message' => 'No live game is currently active.',
+            'fallback_message' => 'Grod werd ned gschbuid.',
             'widget_name' => 'hockeydata.los.Game.LiveBox',
             'js_modules' => 'los_game_livebox',
             'css_modules' => 'los_game_livebox&los_template_default',
